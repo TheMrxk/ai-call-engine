@@ -22,8 +22,7 @@ AI Call Engine 提供 RESTful HTTP API 用于管理会话和处理音频流。
 ```json
 {
   "status": "ok",
-  "service": "ai-call-engine",
-  "version": "1.0.0"
+  "timestamp": 1712326200
 }
 ```
 
@@ -38,9 +37,16 @@ AI Call Engine 提供 RESTful HTTP API 用于管理会话和处理音频流。
 **请求体**:
 ```json
 {
+  "session_id": "custom-id-123",  // 可选，不填则自动生成
+  "config": {
+    "max_duration": 300,
+    "max_turns": 10,
+    "silence_timeout": 10.0
+  },
   "script": {
     "greeting": "您好，请问有什么可以帮您？",
-    "system_prompt": "你是银行客服代表。"
+    "system_prompt": "你是银行客服代表。",
+    "mock_llm": false
   }
 }
 ```
@@ -48,8 +54,8 @@ AI Call Engine 提供 RESTful HTTP API 用于管理会话和处理音频流。
 **响应示例**:
 ```json
 {
-  "session_id": "abc123",
-  "status": "created"
+  "success": true,
+  "session_id": "abc123"
 }
 ```
 
@@ -60,8 +66,7 @@ AI Call Engine 提供 RESTful HTTP API 用于管理会话和处理音频流。
 **响应示例**:
 ```json
 {
-  "session_id": "abc123",
-  "status": "listening"
+  "success": true
 }
 ```
 
@@ -70,16 +75,16 @@ AI Call Engine 提供 RESTful HTTP API 用于管理会话和处理音频流。
 推送音频数据到会话。
 
 **请求头**:
-- `Content-Type: application/octet-stream`
+- `Content-Type: application/octet-stream` 或 `application/json`
 
-**请求体**: PCM 音频数据 (16kHz, 16bit, mono)
+**请求体**: 
+- PCM 音频数据 (16kHz, 16bit, mono)
+- 或 JSON: `{"audio": "base64_encoded_audio"}`
 
 **响应示例**:
 ```json
 {
-  "session_id": "abc123",
-  "status": "processing",
-  "queued": true
+  "success": true
 }
 ```
 
@@ -90,12 +95,29 @@ AI Call Engine 提供 RESTful HTTP API 用于管理会话和处理音频流。
 **响应示例**:
 ```json
 {
-  "session_id": "abc123",
-  "state": "listening",
-  "created_at": "2026-04-05T10:00:00Z",
-  "events": [...],
-  "transcript": "用户说的话...",
-  "response": "AI 回复的内容..."
+  "success": true,
+  "data": {
+    "session_id": "abc123",
+    "state": "listening",
+    "turn_count": 3,
+    "created_at": 1712326200,
+    "started_at": 1712326205,
+    "duration": 120.5,
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "text": "我想咨询贷款",
+        "timestamp": 1712326210
+      },
+      {
+        "turn_id": 1,
+        "role": "assistant",
+        "text": "好的，请问您想了解哪种贷款？",
+        "timestamp": 1712326215
+      }
+    ]
+  }
 }
 ```
 
@@ -106,9 +128,87 @@ AI Call Engine 提供 RESTful HTTP API 用于管理会话和处理音频流。
 **响应示例**:
 ```json
 {
-  "session_id": "abc123",
-  "status": "ended",
-  "duration": 60.5
+  "success": true
+}
+```
+
+---
+
+## 聊天记录导出
+
+### `GET /api/session/{session_id}/export`
+
+导出 Markdown 格式的聊天记录。
+
+**响应**:
+- Content-Type: `text/markdown`
+- Content-Disposition: `attachment; filename="conversation_{session_id}.md"`
+
+**示例**:
+```bash
+curl -X GET "http://localhost:5001/api/session/abc123/export" -o conversation.md
+```
+
+**Markdown 内容包含**:
+- 基本信息（会话 ID、时间、时长、轮数）
+- 客户信息摘要（如果有）
+- 完整对话内容（带时间戳和角色标识）
+- 系统配置
+- 原始 JSON 数据
+
+---
+
+### `GET /api/session/{session_id}/summary`
+
+获取会话摘要数据，用于大模型整理用户信息。
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "data": {
+    "session_id": "abc123",
+    "basic_info": {
+      "started_at": "2026-04-05T14:30:00",
+      "duration": 330.0,
+      "turn_count": 5
+    },
+    "conversation": [
+      {"role": "user", "text": "...", "timestamp": 1712326200},
+      {"role": "assistant", "text": "...", "timestamp": 1712326205}
+    ],
+    "customer_info": {},
+    "full_transcript": "user: ...\nassistant: ..."
+  }
+}
+```
+
+---
+
+### `POST /api/session/{session_id}/customer-info`
+
+更新客户信息（大模型分析后调用）。
+
+**请求体**:
+```json
+{
+  "info": {
+    "interest": "个人消费贷款",
+    "target_amount": "100000",
+    "sentiment": "positive"
+  }
+}
+```
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "customer_info": {
+    "interest": "个人消费贷款",
+    "target_amount": "100000",
+    "sentiment": "positive"
+  }
 }
 ```
 
@@ -127,7 +227,15 @@ AI Call Engine 提供 RESTful HTTP API 用于管理会话和处理音频流。
 }
 ```
 
-**响应**: PCM 音频数据
+**响应**: PCM 音频数据 (audio/wav)
+
+**示例**:
+```bash
+curl -X POST "http://localhost:5001/api/tts/synthesize" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "测试"}' \
+  --output test.wav
+```
 
 ---
 
@@ -139,3 +247,36 @@ AI Call Engine 提供 RESTful HTTP API 用于管理会话和处理音频流。
 | 400 | 请求参数错误 |
 | 404 | 会话不存在 |
 | 500 | 服务器内部错误 |
+
+---
+
+## 使用示例
+
+### 完整对话流程
+
+```bash
+# 1. 创建会话
+SESSION_ID=$(curl -X POST "http://localhost:5001/api/session/create" \
+  -H "Content-Type: application/json" \
+  -d '{"script": {"greeting": "您好"}}' | jq -r '.session_id')
+
+# 2. 启动会话
+curl -X POST "http://localhost:5001/api/session/$SESSION_ID/start"
+
+# 3. 推送音频
+curl -X POST "http://localhost:5001/api/session/$SESSION_ID/audio" \
+  --data-binary @audio.pcm
+
+# 4. 查看状态
+curl "http://localhost:5001/api/session/$SESSION_ID/info"
+
+# 5. 导出聊天记录
+curl "http://localhost:5001/api/session/$SESSION_ID/export" -o conversation.md
+
+# 6. 结束会话
+curl -X POST "http://localhost:5001/api/session/$SESSION_ID/end"
+```
+
+---
+
+详见 [EXPORT_API.md](EXPORT_API.md) 了解聊天记录导出和客户信息整理的完整流程。
