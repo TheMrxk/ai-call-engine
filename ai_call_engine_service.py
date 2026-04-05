@@ -20,6 +20,7 @@ import asyncio
 import tempfile
 import wave
 import uuid
+from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -148,6 +149,119 @@ class CallSession:
 
     # LLM 消息历史
     llm_messages: List[Dict[str, str]] = field(default_factory=list)
+
+    # 客户信息（用于大模型整理）
+    customer_info: Dict[str, Any] = field(default_factory=dict)
+
+
+# ==================== 对话记录器 ====================
+
+class ConversationRecorder:
+    """对话记录器 - 生成 Markdown 格式的聊天记录"""
+
+    @staticmethod
+    def generate_markdown(session: CallSession) -> str:
+        """生成 Markdown 格式的聊天记录"""
+        lines = []
+
+        # 标题
+        lines.append(f"# AI 通话记录")
+        lines.append("")
+
+        # 基本信息
+        lines.append("## 基本信息")
+        lines.append("")
+        lines.append(f"- **会话 ID**: `{session.session_id}`")
+        lines.append(f"- **开始时间**: {datetime.fromtimestamp(session.started_at).strftime('%Y-%m-%d %H:%M:%S') if session.started_at else 'N/A'}")
+        lines.append(f"- **结束时间**: {datetime.fromtimestamp(session.ended_at).strftime('%Y-%m-%d %H:%M:%S') if session.ended_at else 'N/A'}")
+        if session.started_at and session.ended_at:
+            duration = session.ended_at - session.started_at
+            lines.append(f"- **通话时长**: {duration:.1f} 秒")
+        lines.append(f"- **对话轮数**: {session.turn_count}")
+        lines.append(f"- **最终状态**: {session.state.value}")
+        lines.append("")
+
+        # 客户信息摘要（如果有）
+        if session.customer_info:
+            lines.append("## 客户信息摘要")
+            lines.append("")
+            for key, value in session.customer_info.items():
+                lines.append(f"- **{key}**: {value}")
+            lines.append("")
+
+        # 对话内容
+        lines.append("## 对话内容")
+        lines.append("")
+
+        if not session.turns:
+            lines.append("*无对话记录*")
+        else:
+            for turn in session.turns:
+                timestamp = datetime.fromtimestamp(turn.timestamp).strftime('%H:%M:%S')
+                role_icon = "👤" if turn.role == "user" else "🤖"
+                role_name = "客户" if turn.role == "user" else "AI 客服"
+                lines.append(f"### {timestamp} - {role_icon} {role_name}")
+                lines.append("")
+                lines.append(f"{turn.text}")
+                lines.append("")
+
+        # 系统提示词
+        lines.append("## 系统配置")
+        lines.append("")
+        lines.append(f"**系统提示词**: {session.script.system_prompt}")
+        lines.append("")
+        lines.append(f"**问候语**: {session.script.greeting}")
+        lines.append("")
+        lines.append(f"**结束语**: {session.script.closing}")
+        lines.append("")
+
+        # 完整对话 JSON（便于程序处理）
+        lines.append("## 原始数据 (JSON)")
+        lines.append("")
+        lines.append("```json")
+        conversation_data = {
+            "session_id": session.session_id,
+            "started_at": datetime.fromtimestamp(session.started_at).isoformat() if session.started_at else None,
+            "ended_at": datetime.fromtimestamp(session.ended_at).isoformat() if session.ended_at else None,
+            "turn_count": session.turn_count,
+            "turns": [
+                {
+                    "turn_id": t.turn_id,
+                    "role": t.role,
+                    "text": t.text,
+                    "timestamp": datetime.fromtimestamp(t.timestamp).isoformat()
+                }
+                for t in session.turns
+            ],
+            "customer_info": session.customer_info
+        }
+        lines.append(json.dumps(conversation_data, ensure_ascii=False, indent=2))
+        lines.append("```")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def generate_summary_data(session: CallSession) -> Dict[str, Any]:
+        """生成用于大模型整理的结构化数据"""
+        return {
+            "session_id": session.session_id,
+            "basic_info": {
+                "started_at": datetime.fromtimestamp(session.started_at).isoformat() if session.started_at else None,
+                "ended_at": datetime.fromtimestamp(session.ended_at).isoformat() if session.ended_at else None,
+                "duration": (session.ended_at - session.started_at) if session.started_at and session.ended_at else 0,
+                "turn_count": session.turn_count
+            },
+            "conversation": [
+                {
+                    "role": t.role,
+                    "text": t.text,
+                    "timestamp": t.timestamp
+                }
+                for t in session.turns
+            ],
+            "customer_info": session.customer_info,
+            "full_transcript": "\n".join([f"{t.role}: {t.text}" for t in session.turns])
+        }
 
 
 # ==================== AI 通话引擎核心 ====================
@@ -627,6 +741,59 @@ def create_app(engine: Optional[AICallEngine] = None) -> Flask:
         """结束会话"""
         success = engine.end_session(session_id)
         return jsonify({"success": success})
+
+    @app.route('/api/session/<session_id>/export', methods=['GET'])
+    def export_conversation(session_id: str):
+        """导出 Markdown 格式的聊天记录"""
+        session = engine.sessions.get(session_id)
+        if not session:
+            return jsonify({"success": False, "error": "会话不存在"}), 404
+
+        # 生成 Markdown
+        markdown_content = ConversationRecorder.generate_markdown(session)
+
+        # 返回 Markdown 文件
+        filename = f"conversation_{session_id}.md"
+        return Response(
+            markdown_content,
+            mimetype='text/markdown',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"'
+            }
+        )
+
+    @app.route('/api/session/<session_id>/summary', methods=['GET'])
+    def get_session_summary(session_id: str):
+        """获取会话摘要数据（用于大模型整理用户信息）"""
+        session = engine.sessions.get(session_id)
+        if not session:
+            return jsonify({"success": False, "error": "会话不存在"}), 404
+
+        # 生成结构化数据
+        summary_data = ConversationRecorder.generate_summary_data(session)
+
+        return jsonify({
+            "success": True,
+            "data": summary_data
+        })
+
+    @app.route('/api/session/<session_id>/customer-info', methods=['POST'])
+    def update_customer_info(session_id: str):
+        """更新客户信息（大模型整理后调用）"""
+        session = engine.sessions.get(session_id)
+        if not session:
+            return jsonify({"success": False, "error": "会话不存在"}), 404
+
+        data = request.get_json() or {}
+        customer_info = data.get('info', {})
+
+        # 更新客户信息
+        session.customer_info.update(customer_info)
+
+        return jsonify({
+            "success": True,
+            "customer_info": session.customer_info
+        })
 
     @app.route('/api/tts/synthesize', methods=['POST'])
     def synthesize_tts():
