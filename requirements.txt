@@ -1,0 +1,22 @@
+# AI Call Engine - Core Requirements
+# Python 依赖
+
+# Web 框架
+Flask==3.0.0
+Flask-CORS==4.0.0
+
+# 环境配置
+python-dotenv==1.0.0
+
+# HTTP 请求
+requests==2.31.0
+aiohttp==3.9.1
+
+# 音频处理
+pydub==0.25.1
+
+# WebSocket (用于 ASR 通信)
+websocket-client==1.6.1
+
+# VAD 语音活动检测
+webrtcvad==2.0.10
