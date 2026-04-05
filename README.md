@@ -19,6 +19,7 @@
 - 📡 **HTTP API** - 简单易用的 RESTful API
 - 🔄 **实时对话** - 支持双向流式音频传输
 - 💰 **低成本** - 按量付费，单次通话成本约 ¥0.02/分钟
+- 📝 **聊天导出** - Markdown 格式聊天记录，支持客户信息整理
 
 ---
 
@@ -188,7 +189,28 @@ curl -X POST "http://localhost:5001/api/tts/synthesize" \
   --output response.wav
 ```
 
-完整 API 文档请参阅 [API.md](docs/API.md)
+#### 6. 导出聊天记录（Markdown 格式）
+
+```bash
+curl -X GET "http://localhost:5001/api/session/{session_id}/export" \
+  -o conversation.md
+```
+
+#### 7. 获取会话摘要（用于大模型整理）
+
+```bash
+curl -X GET "http://localhost:5001/api/session/{session_id}/summary"
+```
+
+#### 8. 更新客户信息
+
+```bash
+curl -X POST "http://localhost:5001/api/session/{session_id}/customer-info" \
+  -H "Content-Type: application/json" \
+  -d '{"info": {"interest": "个人消费贷款", "budget": "100000"}}'
+```
+
+完整 API 文档请参阅 [API.md](docs/API.md) 和 [EXPORT_API.md](docs/EXPORT_API.md)
 
 ---
 
